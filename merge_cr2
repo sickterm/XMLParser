@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+import os
+import glob
+from XMLParser import XMLParser
+
+def do_merge(base_filename, cr2_filename, output_filename):
+	print("%s / %s -> %s" % (base_filename, cr2_filename, output_filename))
+	base_xml = XMLParser().parsefile(base_filename)
+	cr2_xml = XMLParser().parsefile(cr2_filename)
+
+	base_node = base_xml.getchild("rdf:RDF").getchild("rdf:Description")
+	cr2_node = cr2_xml.getchild("rdf:RDF").getchild("rdf:Description")
+#	base_node.dump()
+	
+	base_rating = int(base_node.get("xmp:Rating", "0"))
+	cr2_rating = int(cr2_node.get("xmp:Rating", "0"))
+
+	rating = max(base_rating, cr2_rating)
+
+	base_node["xmp:Rating"] = str(rating)
+	with open(output_filename, "w") as f:
+		base_xml.write(f)
+
+
+for base_filename in glob.glob("IMG_????.xmp"):
+	cr2_filename = base_filename[:-4] + ".CR2.xmp"
+	if os.path.isfile(cr2_filename):
+		output_filename = "output/" + base_filename
+		do_merge(base_filename, cr2_filename, output_filename)
+
+
