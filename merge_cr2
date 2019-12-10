@@ -1,31 +1,72 @@
 #!/usr/bin/python3
 import os
-import glob
+import sys
+import shutil
 from XMLParser import XMLParser
+from FriendlyArgumentParser import FriendlyArgumentParser
 
-def do_merge(base_filename, cr2_filename, output_filename):
-	print("%s / %s -> %s" % (base_filename, cr2_filename, output_filename))
-	base_xml = XMLParser().parsefile(base_filename)
-	cr2_xml = XMLParser().parsefile(cr2_filename)
+parser = FriendlyArgumentParser(description = "Merge image XMP metadata.")
+parser.add_argument("-r", "--recurse", action = "store_true", help = "Recursively go through directory.")
+parser.add_argument("-n", "--dry-run", action = "store_true", help = "Perform a dry-run, i.e., do not modify anything but only show what would be done.")
+parser.add_argument("-v", "--verbose", action = "count", default = 0, help = "Increases verbosity. Can be specified multiple times to increase.")
+parser.add_argument("dirname", metavar = "dirname", type = str, help = "Name of the directory to process")
+args = parser.parse_args(sys.argv[1:])
 
-	base_node = base_xml.getchild("rdf:RDF").getchild("rdf:Description")
-	cr2_node = cr2_xml.getchild("rdf:RDF").getchild("rdf:Description")
-#	base_node.dump()
-	
-	base_rating = int(base_node.get("xmp:Rating", "0"))
-	cr2_rating = int(cr2_node.get("xmp:Rating", "0"))
+class Merger():
+	def __init__(self, args):
+		self._args = args
 
-	rating = max(base_rating, cr2_rating)
+	def _merge(self, xmp_filename, cr2_filename, backup_filename):
+		if not os.path.isfile(cr2_filename):
+			return
+		if os.path.exists(backup_filename):
+			print("%s + %s [backup %s] -> not overwriting backup file" % (xmp_filename, cr2_filename, backup_filename))
+			return
 
-	base_node["xmp:Rating"] = str(rating)
-	with open(output_filename, "w") as f:
-		base_xml.write(f)
+		if self._args.dry_run:
+			print("%s + %s [backup %s] -> dryrun, not doing anything" % (xmp_filename, cr2_filename, backup_filename))
+			return
 
+		# Make backup first
+		shutil.copy(xmp_filename, backup_filename)
 
-for base_filename in glob.glob("IMG_????.xmp"):
-	cr2_filename = base_filename[:-4] + ".CR2.xmp"
-	if os.path.isfile(cr2_filename):
-		output_filename = "output/" + base_filename
-		do_merge(base_filename, cr2_filename, output_filename)
+		# Then parse files
+		base_xml = XMLParser().parsefile(xmp_filename)
+		cr2_xml = XMLParser().parsefile(cr2_filename)
 
+		base_node = base_xml.getchild("rdf:RDF").getchild("rdf:Description")
+		cr2_node = cr2_xml.getchild("rdf:RDF").getchild("rdf:Description")
+	#	base_node.dump()
 
+		base_rating = int(base_node.get("xmp:Rating", "0"))
+		cr2_rating = int(cr2_node.get("xmp:Rating", "0"))
+
+		rating = max(base_rating, cr2_rating)
+
+		base_node["xmp:Rating"] = str(rating)
+		with open(xmp_filename, "w") as f:
+			base_xml.write(f)
+
+	def _process_file(self, xmp_filename):
+		basename = os.path.basename(xmp_filename)
+		dirname = os.path.dirname(xmp_filename)
+		if basename.startswith("IMG_") and basename.endswith(".xmp"):
+			cr2_filename = dirname + "/" + basename[:-4] + ".CR2.xmp"
+			backup_filename = xmp_filename + ".bak"
+			self._merge(xmp_filename, cr2_filename, backup_filename)
+
+	def _process_dir(self, dirname):
+		if not dirname.endswith("/"):
+			dirname += "/"
+		for filename in os.listdir(dirname):
+			full_filename = dirname + filename
+			if os.path.isfile(full_filename):
+				self._process_file(full_filename)
+			elif os.path.isdir(full_filename) and self._args.recurse:
+				self._process_dir(full_filename)
+
+	def run(self):
+		self._process_dir(self._args.dirname)
+
+merger = Merger(args)
+merger.run()
